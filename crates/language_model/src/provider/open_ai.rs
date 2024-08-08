@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use collections::BTreeMap;
 use editor::{Editor, EditorElement, EditorStyle};
 use futures::{future::BoxFuture, FutureExt, StreamExt};
@@ -7,14 +7,16 @@ use gpui::{
     View, WhiteSpace,
 };
 use http_client::HttpClient;
-use open_ai::stream_completion;
+use open_ai::{
+    stream_completion, FunctionDefinition, ResponseStreamEvent, ToolChoice, ToolDefinition,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use settings::{Settings, SettingsStore};
-use std::{future, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use strum::IntoEnumIterator;
 use theme::ThemeSettings;
-use ui::{prelude::*, Indicator};
+use ui::{prelude::*, Icon, IconName};
 use util::ResultExt;
 
 use crate::{
@@ -206,6 +208,41 @@ pub struct OpenAiLanguageModel {
     request_limiter: RateLimiter,
 }
 
+impl OpenAiLanguageModel {
+    fn stream_completion(
+        &self,
+        request: open_ai::Request,
+        cx: &AsyncAppContext,
+    ) -> BoxFuture<'static, Result<futures::stream::BoxStream<'static, Result<ResponseStreamEvent>>>>
+    {
+        let http_client = self.http_client.clone();
+        let Ok((api_key, api_url, low_speed_timeout)) = cx.read_model(&self.state, |state, cx| {
+            let settings = &AllLanguageModelSettings::get_global(cx).openai;
+            (
+                state.api_key.clone(),
+                settings.api_url.clone(),
+                settings.low_speed_timeout,
+            )
+        }) else {
+            return futures::future::ready(Err(anyhow!("App state dropped"))).boxed();
+        };
+
+        let future = self.request_limiter.stream(async move {
+            let api_key = api_key.ok_or_else(|| anyhow!("missing api key"))?;
+            let request = stream_completion(
+                http_client.as_ref(),
+                &api_url,
+                &api_key,
+                request,
+                low_speed_timeout,
+            );
+            let response = request.await?;
+            Ok(response)
+        });
+
+        async move { Ok(future.await?.boxed()) }.boxed()
+    }
+}
 impl LanguageModel for OpenAiLanguageModel {
     fn id(&self) -> LanguageModelId {
         self.id.clone()
@@ -245,44 +282,68 @@ impl LanguageModel for OpenAiLanguageModel {
         cx: &AsyncAppContext,
     ) -> BoxFuture<'static, Result<futures::stream::BoxStream<'static, Result<String>>>> {
         let request = request.into_open_ai(self.model.id().into());
-
-        let http_client = self.http_client.clone();
-        let Ok((api_key, api_url, low_speed_timeout)) = cx.read_model(&self.state, |state, cx| {
-            let settings = &AllLanguageModelSettings::get_global(cx).openai;
-            (
-                state.api_key.clone(),
-                settings.api_url.clone(),
-                settings.low_speed_timeout,
-            )
-        }) else {
-            return futures::future::ready(Err(anyhow!("App state dropped"))).boxed();
-        };
-
-        let future = self.request_limiter.stream(async move {
-            let api_key = api_key.ok_or_else(|| anyhow!("missing api key"))?;
-            let request = stream_completion(
-                http_client.as_ref(),
-                &api_url,
-                &api_key,
-                request,
-                low_speed_timeout,
-            );
-            let response = request.await?;
-            Ok(open_ai::extract_text_from_events(response).boxed())
-        });
-
-        async move { Ok(future.await?.boxed()) }.boxed()
+        let completions = self.stream_completion(request, cx);
+        async move { Ok(open_ai::extract_text_from_events(completions.await?).boxed()) }.boxed()
     }
 
     fn use_any_tool(
         &self,
-        _request: LanguageModelRequest,
-        _name: String,
-        _description: String,
-        _schema: serde_json::Value,
-        _cx: &AsyncAppContext,
+        request: LanguageModelRequest,
+        tool_name: String,
+        tool_description: String,
+        schema: serde_json::Value,
+        cx: &AsyncAppContext,
     ) -> BoxFuture<'static, Result<serde_json::Value>> {
-        future::ready(Err(anyhow!("not implemented"))).boxed()
+        let mut request = request.into_open_ai(self.model.id().into());
+        let mut function = FunctionDefinition {
+            name: tool_name.clone(),
+            description: None,
+            parameters: None,
+        };
+        let func = ToolDefinition::Function {
+            function: function.clone(),
+        };
+        request.tool_choice = Some(ToolChoice::Other(func.clone()));
+        // Fill in description and params separately, as they're not needed for tool_choice field.
+        function.description = Some(tool_description);
+        function.parameters = Some(schema);
+        request.tools = vec![ToolDefinition::Function { function }];
+        let response = self.stream_completion(request, cx);
+        self.request_limiter
+            .run(async move {
+                let mut response = response.await?;
+
+                // Call arguments are gonna be streamed in over multiple chunks.
+                let mut load_state = None;
+                while let Some(Ok(part)) = response.next().await {
+                    for choice in part.choices {
+                        let Some(tool_calls) = choice.delta.tool_calls else {
+                            continue;
+                        };
+
+                        for call in tool_calls {
+                            if let Some(func) = call.function {
+                                if func.name.as_deref() == Some(tool_name.as_str()) {
+                                    load_state = Some((String::default(), call.index));
+                                }
+                                if let Some((arguments, (output, index))) =
+                                    func.arguments.zip(load_state.as_mut())
+                                {
+                                    if call.index == *index {
+                                        output.push_str(&arguments);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some((arguments, _)) = load_state {
+                    return Ok(serde_json::from_str(&arguments)?);
+                } else {
+                    bail!("tool not used");
+                }
+            })
+            .boxed()
     }
 }
 
@@ -444,7 +505,7 @@ impl Render for ConfigurationView {
                 .size_full()
                 .on_action(cx.listener(Self::save_api_key))
                 .children(
-                    INSTRUCTIONS.map(|instruction| Label::new(instruction).size(LabelSize::Small)),
+                    INSTRUCTIONS.map(|instruction| Label::new(instruction)),
                 )
                 .child(
                     h_flex()
@@ -469,9 +530,9 @@ impl Render for ConfigurationView {
                 .justify_between()
                 .child(
                     h_flex()
-                        .gap_2()
-                        .child(Indicator::dot().color(Color::Success))
-                        .child(Label::new("API key configured").size(LabelSize::Small)),
+                        .gap_1()
+                        .child(Icon::new(IconName::Check).color(Color::Success))
+                        .child(Label::new("API key configured.")),
                 )
                 .child(
                     Button::new("reset-key", "Reset key")
