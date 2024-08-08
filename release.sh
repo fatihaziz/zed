@@ -1,5 +1,27 @@
 #!/bin/bash
 
+# Function to load .env file
+load_env() {
+    if [ -f .env ]; then
+        set -o allexport
+        source <(cat ./.env | tr -d '[:blank:]')
+        set +o allexport
+        echo "NODE_ENV=$NODE_ENV"
+        echo "FORCE_ENV=$FORCE_ENV"
+    else
+        echo "ERROR: .env file is not valid!"
+        exit 1
+    fi
+}
+
+# A function to display a usage message:
+usage() {
+    echo "Usage: $0 [-w|--workspace <workspace>] [-b|--bin <bin>] [-k|--skip-check] [-n|--skip-clean] [-r|--root] [--export-only] [--build-only]"
+}
+
+# Main execution starts here
+load_env
+
 # Initialize our own variables:
 WORKSPACE=""
 BIN=""
@@ -10,13 +32,8 @@ BIN_BUILD_FLAG=false
 ROOT_BUILD_FLAG=false
 EXPORT_ONLY_FLAG=false
 BUILD_ONLY_FLAG=false
-TARGET="x86_64-pc-windows-msvc"
+TARGET=$BUILD_TARGET
 # TARGET="wasm32-wasi"
-
-# A function to display a usage message:
-usage() {
-    echo "Usage: $0 [-w|--workspace <workspace>] [-b|--bin <bin>] [-k|--skip-check] [-n|--skip-clean] [-r|--root] [--export-only] [--build-only]"
-}
 
 # Check if no arguments were passed
 if [ $# -eq 0 ]; then
@@ -157,7 +174,7 @@ done
     # Assume [[bin]] sections contain a 'name = "binary_name"' line
     # BIN_NAMES=$(grep -A 1 "\[\[bin\]\]" $CARGO_TOML_PATH | grep "name =" | cut -d '"' -f2)
     # fetch all .exe(s) inside target/release/* only, don't recursively
-    BIN_NAMES=$(find "$RELEASE_DIR" -maxdepth 1 -type f -name '*.exe' -printf '%f\n')
+    BIN_NAMES=$(find "$RELEASE_DIR" -maxdepth 1 -type f \( -name '*.exe' -o -perm -111 \) -printf '%f\n')
 
     # Iterate over the binary names and copy them to the destination directory
     for BIN_NAME in $BIN_NAMES; do

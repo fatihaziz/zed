@@ -37,3 +37,5 @@ DerivedData/
 /crates
 /extensions
 script/
+
+.env
