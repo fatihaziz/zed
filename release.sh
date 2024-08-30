@@ -6,8 +6,15 @@ load_env() {
         set -o allexport
         source <(cat ./.env | tr -d '[:blank:]')
         set +o allexport
-        echo "NODE_ENV=$NODE_ENV"
-        echo "FORCE_ENV=$FORCE_ENV"
+        if [ ! -z "$ENV"]; then
+          echo "ENV=$ENV"
+        fi
+        if [ ! -z "$FORCE_ENV"]; then
+          echo "NODE_ENV=$NODE_ENV"
+        fi
+        if [ ! -z "$FORCE_ENV"]; then
+          echo "FORCE_ENV=$FORCE_ENV"
+        fi
     else
         echo "ERROR: .env file is not valid!"
         exit 1
@@ -32,7 +39,7 @@ BIN_BUILD_FLAG=false
 ROOT_BUILD_FLAG=false
 EXPORT_ONLY_FLAG=false
 BUILD_ONLY_FLAG=false
-TARGET=$BUILD_TARGET
+TARGET=${BUILD_TARGET:-"x86_64-pc-windows-msvc"}
 # TARGET="wasm32-wasi"
 
 # Check if no arguments were passed
@@ -97,7 +104,7 @@ done
 
 {
   if ! $EXPORT_ONLY_FLAG; then
-    echo "Releasing with options: workspace: $WORKSPACE, bin: $BIN, skip_check: $SKIP_CHECK_FLAG, skip_clean: $SKIP_CLEAN_FLAG, selective_build: $SELECTIVE_BUILD_FLAG, root_build: $ROOT_BUILD_FLAG, build_only: $BUILD_ONLY_FLAG, export_only: $EXPORT_ONLY_FLAG"
+    echo "Releasing to $TARGET with options: workspace: $WORKSPACE, bin: $BIN, skip_check: $SKIP_CHECK_FLAG, skip_clean: $SKIP_CLEAN_FLAG, selective_build: $SELECTIVE_BUILD_FLAG, root_build: $ROOT_BUILD_FLAG, build_only: $BUILD_ONLY_FLAG, export_only: $EXPORT_ONLY_FLAG"
 
     # Cleaning previous builds
     if ! $SKIP_CLEAN_FLAG ; then
