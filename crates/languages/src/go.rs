@@ -5,10 +5,9 @@ use gpui::{AppContext, AsyncAppContext, Task};
 use http_client::github::latest_github_release;
 pub use language::*;
 use lsp::LanguageServerBinary;
-use project::project_settings::{BinarySettings, ProjectSettings};
+use project::{lsp_store::language_server_settings, project_settings::BinarySettings};
 use regex::Regex;
 use serde_json::json;
-use settings::Settings;
 use smol::{fs, process};
 use std::{
     any::Any,
@@ -71,10 +70,7 @@ impl super::LspAdapter for GoLspAdapter {
         cx: &AsyncAppContext,
     ) -> Option<LanguageServerBinary> {
         let configured_binary = cx.update(|cx| {
-            ProjectSettings::get_global(cx)
-                .lsp
-                .get(Self::SERVER_NAME)
-                .and_then(|s| s.binary.clone())
+            language_server_settings(delegate, Self::SERVER_NAME, cx).and_then(|s| s.binary.clone())
         });
 
         match configured_binary {
@@ -145,7 +141,7 @@ impl super::LspAdapter for GoLspAdapter {
         let this = *self;
 
         if let Some(version) = *version {
-            let binary_path = container_dir.join(&format!("gopls_{version}"));
+            let binary_path = container_dir.join(format!("gopls_{version}"));
             if let Ok(metadata) = fs::metadata(&binary_path).await {
                 if metadata.is_file() {
                     remove_matching(&container_dir, |entry| {
@@ -198,7 +194,7 @@ impl super::LspAdapter for GoLspAdapter {
             .find(version_stdout)
             .with_context(|| format!("failed to parse golps version output '{version_stdout}'"))?
             .as_str();
-        let binary_path = container_dir.join(&format!("gopls_{version}"));
+        let binary_path = container_dir.join(format!("gopls_{version}"));
         fs::rename(&installed_binary_path, &binary_path).await?;
 
         Ok(LanguageServerBinary {
@@ -518,7 +514,13 @@ impl ContextProvider for GoContextProvider {
                     GO_PACKAGE_TASK_VARIABLE.template_value(),
                     VariableName::Symbol.template_value(),
                 ),
-                command: format!("go test -run {}", VariableName::Symbol.template_value(),),
+                command: "go".into(),
+                args: vec![
+                    "test".into(),
+                    GO_PACKAGE_TASK_VARIABLE.template_value(),
+                    "-run".into(),
+                    format!("^{}\\$", VariableName::Symbol.template_value(),),
+                ],
                 tags: vec!["go-test".to_owned()],
                 cwd: package_cwd.clone(),
                 ..TaskTemplate::default()
