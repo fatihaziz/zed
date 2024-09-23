@@ -4,15 +4,15 @@
 load_env() {
     if [ -f .env ]; then
         set -o allexport
-        source <(cat ./.env | tr -d '[:blank:]')
+        source <(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' .env)
         set +o allexport
-        if [ ! -z "$ENV"]; then
+        if [ ! -z "$ENV" ]; then
           echo "ENV=$ENV"
         fi
-        if [ ! -z "$FORCE_ENV"]; then
+        if [ ! -z "$FORCE_ENV" ]; then
           echo "NODE_ENV=$NODE_ENV"
         fi
-        if [ ! -z "$FORCE_ENV"]; then
+        if [ ! -z "$FORCE_ENV" ]; then
           echo "FORCE_ENV=$FORCE_ENV"
         fi
     else
@@ -39,7 +39,9 @@ BIN_BUILD_FLAG=false
 ROOT_BUILD_FLAG=false
 EXPORT_ONLY_FLAG=false
 BUILD_ONLY_FLAG=false
-TARGET=${BUILD_TARGET:-"x86_64-pc-windows-msvc"}
+TARGET="${BUILD_TARGET:-"x86_64-pc-windows-msvc"}"
+echo "BUILDER_BIN=$BUILDER_BIN"
+BUILDER_BIN="${BUILDER_BIN:-"cargo build"}"
 # TARGET="wasm32-wasi"
 
 # Check if no arguments were passed
@@ -128,25 +130,25 @@ done
 
     # Build based on flags and capture errors
     if $ROOT_BUILD_FLAG ; then
-      cargo build -r --target $TARGET || {
+      $BUILDER_BIN --release --target $TARGET || {
         echo -e "\033[31mCargo build failed for root! ❌\033[0m"
         exit 1
       }
     elif $SELECTIVE_BUILD_FLAG ; then
       if $BIN_BUILD_FLAG ; then
         cd $WORKSPACE
-        cargo build --bin $BIN -r --target $TARGET || {
+        $BUILDER_BIN --bin $BIN --release --target $TARGET || {
           echo -e "\033[31mCargo build failed for binary $BIN! ❌\033[0m"
           exit 1
         }
       else
-        cargo build -p $WORKSPACE -r --target $TARGET || {
+        $BUILDER_BIN -p $WORKSPACE --release --target $TARGET || {
           echo -e "\033[31mCargo build failed for package $WORKSPACE! ❌\033[0m"
           exit 1
         }
       fi
     else
-      cargo build --workspace -r --target $TARGET || {
+      $BUILDER_BIN --workspace --release --target $TARGET || {
         echo -e "\033[31mCargo build failed for workspace! ❌\033[0m"
         exit 1
       }
@@ -181,7 +183,8 @@ done
     # Assume [[bin]] sections contain a 'name = "binary_name"' line
     # BIN_NAMES=$(grep -A 1 "\[\[bin\]\]" $CARGO_TOML_PATH | grep "name =" | cut -d '"' -f2)
     # fetch all .exe(s) inside target/release/* only, don't recursively
-    BIN_NAMES=$(find "$RELEASE_DIR" -maxdepth 1 -type f \( -name '*.exe' -o -perm -111 \) -printf '%f\n')
+    # BIN_NAMES=$(find "$RELEASE_DIR" -maxdepth 1 -type f \( -name '*.exe' -o -perm -111 \) -printf '%f\n')
+    BIN_NAMES=$(find "$RELEASE_DIR" -maxdepth 1 -type f \( -name '*.exe' -o -executable \) ! -name '*.d' -printf '%f\n')
 
     # Iterate over the binary names and copy them to the destination directory
     for BIN_NAME in $BIN_NAMES; do
