@@ -18,18 +18,13 @@ use std::{
 use util::{maybe, ResultExt};
 
 #[cfg(target_os = "windows")]
-const SERVER_PATH: &str = "node_modules/.bin/tailwindcss-language-server.ps1";
+const SERVER_PATH: &str =
+    "node_modules/@tailwindcss/language-server/bin/tailwindcss-language-server";
 #[cfg(not(target_os = "windows"))]
 const SERVER_PATH: &str = "node_modules/.bin/tailwindcss-language-server";
 
-#[cfg(not(target_os = "windows"))]
 fn server_binary_arguments(server_path: &Path) -> Vec<OsString> {
     vec![server_path.into(), "--stdio".into()]
-}
-
-#[cfg(target_os = "windows")]
-fn server_binary_arguments(server_path: &Path) -> Vec<OsString> {
-    vec!["-File".into(), server_path.into(), "--stdio".into()]
 }
 
 pub struct TailwindLspAdapter {
@@ -37,7 +32,8 @@ pub struct TailwindLspAdapter {
 }
 
 impl TailwindLspAdapter {
-    const SERVER_NAME: &'static str = "tailwindcss-language-server";
+    const SERVER_NAME: LanguageServerName =
+        LanguageServerName::new_static("tailwindcss-language-server");
 
     pub fn new(node: Arc<dyn NodeRuntime>) -> Self {
         TailwindLspAdapter { node }
@@ -47,7 +43,7 @@ impl TailwindLspAdapter {
 #[async_trait(?Send)]
 impl LspAdapter for TailwindLspAdapter {
     fn name(&self) -> LanguageServerName {
-        LanguageServerName(Self::SERVER_NAME.into())
+        Self::SERVER_NAME.clone()
     }
 
     async fn check_if_user_installed(
@@ -57,7 +53,7 @@ impl LspAdapter for TailwindLspAdapter {
     ) -> Option<LanguageServerBinary> {
         let configured_binary = cx
             .update(|cx| {
-                language_server_settings(delegate, Self::SERVER_NAME, cx)
+                language_server_settings(delegate, &Self::SERVER_NAME, cx)
                     .and_then(|s| s.binary.clone())
             })
             .ok()??;
@@ -114,26 +110,11 @@ impl LspAdapter for TailwindLspAdapter {
                 .await?;
         }
 
-        #[cfg(target_os = "windows")]
-        {
-            let env_path = self.node.node_environment_path().await?;
-            let mut env = HashMap::default();
-            env.insert("PATH".to_string(), env_path.to_string_lossy().to_string());
-
-            Ok(LanguageServerBinary {
-                path: "powershell.exe".into(),
-                env: Some(env),
-                arguments: server_binary_arguments(&server_path),
-            })
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            Ok(LanguageServerBinary {
-                path: self.node.binary_path().await?,
-                env: None,
-                arguments: server_binary_arguments(&server_path),
-            })
-        }
+        Ok(LanguageServerBinary {
+            path: self.node.binary_path().await?,
+            env: None,
+            arguments: server_binary_arguments(&server_path),
+        })
     }
 
     async fn cached_server_binary(
@@ -172,7 +153,7 @@ impl LspAdapter for TailwindLspAdapter {
         cx: &mut AsyncAppContext,
     ) -> Result<Value> {
         let tailwind_user_settings = cx.update(|cx| {
-            language_server_settings(delegate.as_ref(), Self::SERVER_NAME, cx)
+            language_server_settings(delegate.as_ref(), &Self::SERVER_NAME, cx)
                 .and_then(|s| s.settings.clone())
                 .unwrap_or_default()
         })?;

@@ -9,10 +9,10 @@ use futures::{io::BufReader, FutureExt as _};
 use futures::{lock::Mutex, AsyncReadExt};
 use indexed_docs::IndexedDocsDatabase;
 use isahc::config::{Configurable, RedirectPolicy};
-use language::LanguageName;
 use language::{
     language_settings::AllLanguageSettings, LanguageServerBinaryStatus, LspAdapterDelegate,
 };
+use language::{LanguageName, LanguageServerName};
 use project::project_settings::ProjectSettings;
 use semantic_version::SemanticVersion;
 use std::{
@@ -55,16 +55,7 @@ pub type ExtensionHttpResponseStream = Arc<Mutex<::http_client::Response<AsyncBo
 
 pub fn linker() -> &'static Linker<WasmState> {
     static LINKER: OnceLock<Linker<WasmState>> = OnceLock::new();
-    LINKER.get_or_init(|| {
-        super::new_linker(|linker, f| {
-            Extension::add_to_linker(linker, f)?;
-            latest::zed::extension::github::add_to_linker(linker, f)?;
-            latest::zed::extension::nodejs::add_to_linker(linker, f)?;
-            latest::zed::extension::platform::add_to_linker(linker, f)?;
-            latest::zed::extension::slash_command::add_to_linker(linker, f)?;
-            Ok(())
-        })
-    })
+    LINKER.get_or_init(|| super::new_linker(Extension::add_to_linker))
 }
 
 impl From<Command> for latest::Command {
@@ -375,7 +366,7 @@ impl ExtensionImports for WasmState {
                             .and_then(|key| {
                                 ProjectSettings::get(location, cx)
                                     .lsp
-                                    .get(&Arc::<str>::from(key))
+                                    .get(&LanguageServerName(key.into()))
                             })
                             .cloned()
                             .unwrap_or_default();

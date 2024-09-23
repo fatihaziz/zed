@@ -93,6 +93,62 @@ Extensions that provide language servers may also provide default settings for t
 
 `boolean` values
 
+## Base Keymap
+
+- Description: Base key bindings scheme. Base keymaps can be overridden with user keymaps.
+- Setting: `base_keymap`
+- Default: `VSCode`
+
+**Options**
+
+1. VSCode
+
+```json
+{
+  "base_keymap": "VSCode"
+}
+```
+
+2. Atom
+
+```json
+{
+  "base_keymap": "Atom"
+}
+```
+
+3. JetBrains
+
+```json
+{
+  "base_keymap": "JetBrains"
+}
+```
+
+4. None
+
+```json
+{
+  "base_keymap": "None"
+}
+```
+
+5. SublimeText
+
+```json
+{
+  "base_keymap": "SublimeText"
+}
+```
+
+6. TextMate
+
+```json
+{
+  "base_keymap": "TextMate"
+}
+```
+
 ## Buffer Font Family
 
 - Description: The name of a font to use for rendering text in the editor.
@@ -159,7 +215,7 @@ For example, to use `Nerd Font` as a fallback, add the following to your setting
 
 **Options**
 
-`integer` values
+`integer` values from `6` to `100` pixels (inclusive)
 
 ## Buffer Font Weight
 
@@ -293,11 +349,37 @@ List of `string` values
 
 `boolean` values
 
-## Default Dock Anchor
+## Cursor Shape
 
-- Description: The default anchor for new docks.
-- Setting: `default_dock_anchor`
-- Default: `bottom`
+- Description: Cursor shape for the default editor.
+- Setting: `cursor_shape`
+- Default: `bar`
+
+**Options**
+
+1. A vertical bar:
+
+```json
+"cursor_shape": "bar"
+```
+
+2. A block that surrounds the following character:
+
+```json
+"cursor_shape": "block"
+```
+
+3. An underscore that runs along the following character:
+
+```json
+"cursor_shape": "underscore"
+```
+
+4. An box drawn around the following character:
+
+```json
+"cursor_shape": "hollow"
+```
 
 **Options**
 
@@ -543,8 +625,13 @@ Each option controls displaying of a particular toolbar element. If all elements
 The following settings can be overridden for specific language servers:
 
 - `initialization_options`
+- `settings`
 
-To override settings for a language, add an entry for that language server's name to the `lsp` value. Example:
+To override configuration for a language server, add an entry for that language server's name to the `lsp` value.
+
+Some options are passed via `initialization_options` to the language server. These are for options which must be specified at language server startup and when changed will require restarting the language server.
+
+For example to pass the `check` option to `rust-analyzer`, use the following configuration:
 
 ```json
 "lsp": {
@@ -552,6 +639,20 @@ To override settings for a language, add an entry for that language server's nam
     "initialization_options": {
       "check": {
         "command": "clippy" // rust-analyzer.check.command (default: "check")
+      }
+    }
+  }
+}
+```
+
+While other options may be changed at a runtime and should be placed under `settings`:
+
+```json
+"lsp": {
+  "yaml-language-server": {
+    "settings": {
+      "yaml": {
+        "keyOrdering": true // Enforces alphabetical ordering of keys in maps
       }
     }
   }
@@ -806,7 +907,50 @@ To interpret all `.c` files as C++, files called `MyLockFile` as TOML and files 
 }
 ```
 
-### Indent Guides
+### Inline Git Blame
+
+- Description: Whether or not to show git blame information inline, on the currently focused line.
+- Setting: `inline_blame`
+- Default:
+
+```json
+{
+  "git": {
+    "inline_blame": {
+      "enabled": true
+    }
+  }
+}
+```
+
+**Options**
+
+1. Disable inline git blame:
+
+```json
+{
+  "git": {
+    "inline_blame": {
+      "enabled": false
+    }
+  }
+}
+```
+
+2. Only show inline git blame after a delay (that starts after cursor stops moving):
+
+```json
+{
+  "git": {
+    "inline_blame": {
+      "enabled": true,
+      "delay_ms": 500
+    }
+  }
+}
+```
+
+## Indent Guides
 
 - Description: Configuration related to indent guides. Indent guides can be configured separately for each language.
 - Setting: `indent_guides`
@@ -875,49 +1019,6 @@ To interpret all `.c` files as C++, files called `MyLockFile` as TOML and files 
 }
 ```
 
-### Inline Git Blame
-
-- Description: Whether or not to show git blame information inline, on the currently focused line.
-- Setting: `inline_blame`
-- Default:
-
-```json
-{
-  "git": {
-    "inline_blame": {
-      "enabled": true
-    }
-  }
-}
-```
-
-**Options**
-
-1. Disable inline git blame:
-
-```json
-{
-  "git": {
-    "inline_blame": {
-      "enabled": false
-    }
-  }
-}
-```
-
-2. Only show inline git blame after a delay (that starts after cursor stops moving):
-
-```json
-{
-  "git": {
-    "inline_blame": {
-      "enabled": true,
-      "delay_ms": 500
-    }
-  }
-}
-```
-
 ## Hard Tabs
 
 - Description: Whether to indent lines using tab characters or multiple spaces.
@@ -950,6 +1051,7 @@ To interpret all `.c` files as C++, files called `MyLockFile` as TOML and files 
   "show_type_hints": true,
   "show_parameter_hints": true,
   "show_other_hints": true,
+  "show_background": false,
   "edit_debounce_ms": 700,
   "scroll_debounce_ms": 50
 }
@@ -1075,10 +1177,10 @@ The following URI schemes are supported:
 
 - `http`
 - `https`
-- `socks4`
-- `socks4a`
-- `socks5`
-- `socks5h`
+- `socks4` - SOCKS4 proxy with local DNS
+- `socks4a` - SOCKS4 proxy with remote DNS
+- `socks5` - SOCKS5 proxy with local DNS
+- `socks5h` - SOCKS5 proxy with remote DNS
 
 `http` will be used when no scheme is specified.
 
@@ -1096,7 +1198,7 @@ Or to set a `socks5` proxy:
 
 ```json
 {
-  "proxy": "socks5://localhost:10808"
+  "proxy": "socks5h://localhost:10808"
 }
 ```
 
@@ -1179,7 +1281,7 @@ Or to set a `socks5` proxy:
 - Setting: `search`
 - Default:
 
-```
+```json
 "search": {
   "whole_word": false,
   "case_sensitive": false,
@@ -1516,14 +1618,14 @@ The name of any font family installed on the user's system
 
 See Buffer Font Features
 
-```jsonc
+```json
 {
   "terminal": {
     "font_features": {
-      "calt": false,
+      "calt": false
       // See Buffer Font Features for more features
-    },
-  },
+    }
+  }
 }
 ```
 
@@ -1537,33 +1639,33 @@ See Buffer Font Features
 
 1. Use a line height that's `comfortable` for reading, 1.618. (default)
 
-```jsonc
+```json
 {
   "terminal": {
-    "line_height": "comfortable",
-  },
+    "line_height": "comfortable"
+  }
 }
 ```
 
 2. Use a `standard` line height, 1.3. This option is useful for TUIs, particularly if they use box characters
 
-```jsonc
+```json
 {
   "terminal": {
-    "line_height": "standard",
-  },
+    "line_height": "standard"
+  }
 }
 ```
 
 3.  Use a custom line height.
 
-```jsonc
+```json
 {
   "terminal": {
     "line_height": {
-      "custom": 2,
-    },
-  },
+      "custom": 2
+    }
+  }
 }
 ```
 
@@ -2075,6 +2177,16 @@ Float values between `0.0` and `0.9`, where:
   "unnecessary_code_fade": 0.5
 }
 ```
+
+## UI Font Size
+
+- Description: The default font size for text in the UI.
+- Setting: `ui_font_size`
+- Default: `16`
+
+**Options**
+
+`integer` values from `6` to `100` pixels (inclusive)
 
 ## An example configuration:
 

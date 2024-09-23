@@ -46,7 +46,7 @@ impl RenderOnce for AnyIcon {
 /// The decoration for an icon.
 ///
 /// For example, this can show an indicator, an "x",
-/// or a diagonal strkethrough to indicate something is disabled.
+/// or a diagonal strikethrough to indicate something is disabled.
 #[derive(Debug, PartialEq, Copy, Clone, EnumIter)]
 pub enum IconDecoration {
     Strikethrough,
@@ -165,7 +165,7 @@ pub enum IconName {
     Copy,
     CountdownTimer,
     CursorIBeam,
-    CursorText,
+    TextSnippet,
     Dash,
     DatabaseZap,
     Delete,
@@ -255,6 +255,7 @@ pub enum IconName {
     Slash,
     SlashSquare,
     Sliders,
+    SlidersVertical,
     Snip,
     Space,
     Sparkle,
@@ -284,6 +285,7 @@ pub enum IconName {
     XCircle,
     ZedAssistant,
     ZedAssistantFilled,
+    ZedXCopilot,
 }
 
 #[derive(IntoElement)]
