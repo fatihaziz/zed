@@ -4,7 +4,7 @@
 load_env() {
     if [ -f .env ]; then
         set -o allexport
-        source <(cat ./.env | tr -d '[:blank:]')
+        source <(sed 's/^[[:space:]]*//;s/[[:space:]]*$//' .env)
         set +o allexport
         if [ ! -z "$ENV" ]; then
           echo "ENV=$ENV"
@@ -23,7 +23,7 @@ load_env() {
 
 # A function to display a usage message:
 usage() {
-    echo "Usage: $0 [-w|--workspace <workspace>] [-b|--bin <bin>] [-k|--skip-check] [-n|--skip-clean] [-r|--root] [--export-only] [--build-only]"
+    echo "Usage: $0 [-w|--workspace <workspace>] [-b|--bin <bin>] [-k|--skip-check] [-n|--skip-clean] [-r|--root] [-e|--export-only] [-u|--build-only] [--release-fast]"
 }
 
 # Main execution starts here
@@ -39,7 +39,11 @@ BIN_BUILD_FLAG=false
 ROOT_BUILD_FLAG=false
 EXPORT_ONLY_FLAG=false
 BUILD_ONLY_FLAG=false
-TARGET=${BUILD_TARGET:-"x86_64-pc-windows-msvc"}
+RELEASE_FLAG="release"
+RUST_HOST=$(rustc -vV | sed -n 's/host: //p')
+TARGET="${BUILD_TARGET:-"${RUST_HOST}"}"
+echo "BUILDER_BIN=$BUILDER_BIN"
+BUILDER_BIN="${BUILDER_BIN:-"cargo build"}"
 # TARGET="wasm32-wasi"
 
 # Check if no arguments were passed
@@ -49,7 +53,7 @@ if [ $# -eq 0 ]; then
 fi
 
 # Parse the command-line arguments:
-OPTIONS=$(getopt -o w:b:knreu --long workspace:,bin:,skip-check,skip-clean,root,export-only,build-only -- "$@")
+OPTIONS=$(getopt -o w:b:knreu --long workspace:,bin:,skip-check,skip-clean,root,export-only,build-only,release-fast -- "$@")
 
 if [ $? -ne 0 ]; then
     # getopt has complained about wrong arguments to stdout
@@ -91,6 +95,10 @@ while true; do
             BUILD_ONLY_FLAG=true
             shift
             ;;
+        --release-fast)
+            RELEASE_FLAG="release-fast"
+            shift
+            ;;
         --)
             shift
             break
@@ -102,9 +110,35 @@ while true; do
     esac
 done
 
+copying_files() {
+  local targets=$1
+  local destination=$2
+
+  for target in $targets; do
+    target_base=$(basename "$target")
+    # Construct the copy command
+    COPY_COMMAND="cp '${target}' '${destination}/${target_base}'"
+
+    # Execute the copy command
+    eval $COPY_COMMAND
+
+    # Verify the copy
+    if [ -f "${destination}/${target_base}" ]; then
+        echo "✅ ${target_base} ==> ${destination}/${target_base}! Copied successfully!"
+    else
+        echo "Failed to copy ${target_base}"
+        exit 1
+    fi
+  done
+}
+
 {
   if ! $EXPORT_ONLY_FLAG; then
-    echo "Releasing to $TARGET with options: workspace: $WORKSPACE, bin: $BIN, skip_check: $SKIP_CHECK_FLAG, skip_clean: $SKIP_CLEAN_FLAG, selective_build: $SELECTIVE_BUILD_FLAG, root_build: $ROOT_BUILD_FLAG, build_only: $BUILD_ONLY_FLAG, export_only: $EXPORT_ONLY_FLAG"
+    echo "Releasing to $TARGET with options:
+    workspace: $WORKSPACE, bin: $BIN, skip_check: $SKIP_CHECK_FLAG, skip_clean: $SKIP_CLEAN_FLAG,
+    selective_build: $SELECTIVE_BUILD_FLAG, root_build: $ROOT_BUILD_FLAG,
+    build_only: $BUILD_ONLY_FLAG, export_only: $EXPORT_ONLY_FLAG,
+    release_flag: $RELEASE_FLAG"
 
     # Cleaning previous builds
     if ! $SKIP_CLEAN_FLAG ; then
@@ -128,25 +162,25 @@ done
 
     # Build based on flags and capture errors
     if $ROOT_BUILD_FLAG ; then
-      cargo build -r --target $TARGET || {
+      $BUILDER_BIN --profile $RELEASE_FLAG --target $TARGET || {
         echo -e "\033[31mCargo build failed for root! ❌\033[0m"
         exit 1
       }
     elif $SELECTIVE_BUILD_FLAG ; then
       if $BIN_BUILD_FLAG ; then
         cd $WORKSPACE
-        cargo build --bin $BIN -r --target $TARGET || {
+        $BUILDER_BIN --bin $BIN --profile $RELEASE_FLAG --target $TARGET || {
           echo -e "\033[31mCargo build failed for binary $BIN! ❌\033[0m"
           exit 1
         }
       else
-        cargo build -p $WORKSPACE -r --target $TARGET || {
+        $BUILDER_BIN -p $WORKSPACE --profile $RELEASE_FLAG --target $TARGET || {
           echo -e "\033[31mCargo build failed for package $WORKSPACE! ❌\033[0m"
           exit 1
         }
       fi
     else
-      cargo build --workspace -r --target $TARGET || {
+      $BUILDER_BIN --workspace --profile $RELEASE_FLAG --target $TARGET || {
         echo -e "\033[31mCargo build failed for workspace! ❌\033[0m"
         exit 1
       }
@@ -165,47 +199,58 @@ done
     CARGO_TOML_PATH="./Cargo.toml"
 
     # Define the release directory where binaries are located
-    RELEASE_DIR="./target/$TARGET/release"
+    RELEASE_DIR="./target/${TARGET}/${RELEASE_FLAG}"
 
     # Define the destination directory for the binaries
     DESTINATION_DIR="./bin"
 
     # Remove the destination directory if it exists
     echo "Removing ${DESTINATION_DIR}..."
-    rm -r ${DESTINATION_DIR}
+    rm -rf ${DESTINATION_DIR}
 
-    # Create the destination directory if it does not exist
+    # Create the destination directory
+    echo "Creating ${DESTINATION_DIR}..."
     mkdir -p $DESTINATION_DIR
 
     # Extract the binary names from Cargo.toml
     # Assume [[bin]] sections contain a 'name = "binary_name"' line
     # BIN_NAMES=$(grep -A 1 "\[\[bin\]\]" $CARGO_TOML_PATH | grep "name =" | cut -d '"' -f2)
     # fetch all .exe(s) inside target/release/* only, don't recursively
-    BIN_NAMES=$(find "$RELEASE_DIR" -maxdepth 1 -type f \( -name '*.exe' -o -perm -111 \) -printf '%f\n')
+    # BIN_NAMES=$(find "$RELEASE_DIR" -maxdepth 1 -type f \( -name '*.exe' -o -perm -111 \) -printf '%f\n')
+
+    echo "Searching for binaries in ${RELEASE_DIR}..."
+    BIN_NAMES=$(find "$RELEASE_DIR" -maxdepth 1 -type f \( -name '*.exe' -o -executable \) ! -name '*.d' -print)
+    ENV_NAMES=$(find "." -maxdepth 1 -type f \( -name '*.env*' \) ! -print)
+
+    if [ -z "$BIN_NAMES" ]; then
+        echo "No binaries found in ${RELEASE_DIR}"
+        exit 1
+    fi
 
     # Iterate over the binary names and copy them to the destination directory
-    for BIN_NAME in $BIN_NAMES; do
-        # Construct the copy command
-        COPY_COMMAND="cp ${RELEASE_DIR}/${BIN_NAME} ${DESTINATION_DIR}/${BIN_NAME}"
+    echo ""
+    echo "Copying ${BIN_NAMES}..."
+    echo ""
+    copying_files "$BIN_NAMES" "$DESTINATION_DIR"
+    echo "✅ All binaries have been copied!"
 
-        # Execute the copy command
-        echo "Copying ${BIN_NAME}..."
-        $COPY_COMMAND
-    done
-    echo "All binaries have been copied."
+    cp ${CARGO_TOML_PATH} ${DESTINATION_DIR}/
+    echo "✅ ${CARGO_TOML_PATH} ==> ${DESTINATION_DIR}/${CARGO_TOML_PATH} copied!"
 
-    cp $CARGO_TOML_PATH ${DESTINATION_DIR}/
-    echo "CARGO_TOML_PATH copied."
+    echo ""
+    copying_files "$ENV_NAMES" "$DESTINATION_DIR"
+    echo "✅ All env(s) have been copied!"
 
-    cp .env ${DESTINATION_DIR}/ || {
-      echo -e "\033[31m.env copy failed! ❌\033[0m"
-    }
-    echo "ENV copy done."
-
-    cp -R ./storage ${DESTINATION_DIR}/ || {
+    echo ""
+    cp -rv ./storage ${DESTINATION_DIR}/ || {
       echo -e "\033[31mStorage copy failed! ❌\033[0m"
     }
     echo "STORAGE copy done."
+
+    cp -rv ./config ${DESTINATION_DIR}/ || {
+      echo -e "\033[31mConfig copy failed! ❌\033[0m"
+    }
+    echo "CONFIG copy done."
   else
     echo "Build only option enabled, skipping export step... 🛠️"
   fi
